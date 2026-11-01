@@ -1,7 +1,7 @@
 // The Bluetooth link to the cooler, cut down from debug-dashboard/src/server/cooler.server.ts to what
 // fan control needs: connect, set a custom speed, put it to sleep on the way out.
 import { Bluetooth } from 'webbluetooth'
-import { CMD, FrameParser, NOTIFY_UUID, SERVICE_UUID, WRITE_UUID, frame, le16, type Frame } from './protocol'
+import { CMD, FrameParser, NOTIFY_UUID, SERVICE_UUID, WRITE_UUID, frame, le16, u16, type Frame } from './protocol'
 
 // The firmware takes one frame per 5 ms and drops the rest silently, so leave headroom.
 const WRITE_GAP_MS = 30
@@ -92,6 +92,33 @@ export class Cooler {
 
   async supply(): Promise<number | undefined> {
     return (await this.request(CMD.supply))?.[0]
+  }
+
+  // Leaves custom-speed mode. The cooler saves the gear and refuses ones its supply can't drive.
+  async selectGear(gear: number) {
+    const reply = await this.request(CMD.selectGear, [gear])
+    if (reply?.[0] === 5) throw new Error(`Gear ${gear} refused: the power supply is too weak`)
+    if (reply?.[0] !== 1) throw new Error(reply ? `Gear ${gear} refused (status ${reply[0]})` : 'No reply to select gear')
+  }
+
+  // RPM of gears 1–4.
+  async gearSpeeds(): Promise<number[] | undefined> {
+    const p = await this.request(CMD.gearSpeeds)
+    return p && p.length >= 8 ? [0, 2, 4, 6].map((i) => u16(p, i)) : undefined
+  }
+
+  async strip(): Promise<boolean | undefined> {
+    const p = await this.request(CMD.stripState)
+    return p?.length ? p[0] !== 0 : undefined
+  }
+
+  async setStrip(on: boolean) {
+    await this.request(CMD.strip, [on ? 1 : 0])
+  }
+
+  // The firmware has no query for the gear LEDs, so the caller remembers the setting.
+  async setGearLeds(on: boolean) {
+    await this.request(CMD.gearLeds, [on ? 1 : 0])
   }
 
   // Custom-speed mode is dropped when the last host disconnects or someone presses the

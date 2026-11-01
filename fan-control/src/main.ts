@@ -2,11 +2,13 @@
 // and drops the Bluetooth link.
 import { parseArgs } from 'node:util'
 import { Cooler, message, sleep } from './cooler'
-import { CONFIG_PATH, saveCurve, savedCurve } from './config'
+import { spawn } from 'node:child_process'
+import { CONFIG_PATH, ensureConfig, saveCurve, saveGearLeds, savedCurve, savedGearLeds } from './config'
 import { DEFAULT_CURVE, parseCurve, rpmFor } from './curve'
-import { MAX_RPM, SUPPLY_MAX_RPM, SUPPLY_NAMES } from './protocol'
+import { openPath } from './open'
+import { MAX_RPM, MIN_RPM, SUPPLY_MAX_RPM, SUPPLY_NAMES } from './protocol'
 import { detectSensors, hottest } from './sensors'
-import { startTray, type Tray } from './tray'
+import { startTray, type MenuItem, type Tray } from './tray'
 
 const HELP = `Usage: flydigi-fan [options]
 
@@ -15,8 +17,9 @@ the hotter of the CPU and GPU. Below the curve's first temperature it turns the 
 disconnecting, and reconnects once it's warm again. Ctrl+C (or SIGTERM) turns the cooler off
 and disconnects.
 
-A tray icon shows where the temperature sits on the curve. Its menu has "Force off", which
-keeps the cooler off until unchecked (not saved), and "Quit".
+A tray icon shows where the temperature sits on the curve. Its menu switches between Smart
+(this curve) and the cooler's fixed gears, toggles the light strip and gear LEDs, forces the
+cooler off, opens the config file, restarts and quits.
 
 Options:
   --curve <t:rpm,...>   Temperature (°C) to RPM points, 1300–4000 RPM. Without it: the saved
@@ -78,7 +81,9 @@ if (args.help) {
 
 let curve: ReturnType<typeof parseCurve> = []
 let sensors: ReturnType<typeof detectSensors> = { cpu: [], gpu: [] }
+let gearLeds = true // saved, because the cooler can't report it
 try {
+  gearLeds = savedGearLeds()
   if (args.save && !args.curve) throw new Error('--save needs --curve')
   curve = args.curve ? parseCurve(args.curve) : (savedCurve() ?? parseCurve(DEFAULT_CURVE))
   if (args.save) {
@@ -114,8 +119,20 @@ let coldSince: number | undefined
 let forceOff = false // from the tray menu, never saved
 let reading: { cpu?: number; gpu?: number; temp?: number } = {}
 
+// Smart follows the curve; a gear hands the speed to the cooler. Always starts as Smart.
+type Mode = 'smart' | 1 | 2 | 3 | 4
+const GEARS = [1, 2, 3, 4] as const
+let mode: Mode = 'smart'
+let gearApplied: number | undefined // gear the cooler was last told
+let gearAppliedAt = 0
+let gearRpm: number[] | undefined // per gear, from the cooler
+let supplyLevel: number | undefined
+const refusedGears = new Set<number>() // refused since connecting
+let stripOn: boolean | undefined // read from the cooler
+
 const cooler = new Cooler(match, SCAN_SECONDS, () => {
   applied = undefined
+  gearApplied = undefined
   if (!stopping) log('Cooler disconnected. Reconnecting…')
 })
 
@@ -131,9 +148,31 @@ async function connect() {
   if (stopping) return false
   log(`Connected to ${cooler.name}`)
   applied = undefined
+  gearApplied = undefined
+  refusedGears.clear()
   await cooler.wake().catch(() => {})
+  gearRpm = (await cooler.gearSpeeds().catch(() => undefined)) ?? gearRpm
   await readSupply()
+  stripOn = await cooler.strip().catch(() => undefined)
+  await cooler.setGearLeds(gearLeds).catch((err) => log(`Gear LEDs: ${message(err)}`))
   return true
+}
+
+// A gear is out when its speed is over what the power supply allows, or the cooler refused it.
+function supportedGear(gear: number) {
+  if (refusedGears.has(gear)) return false
+  const rpm = gearRpm?.[gear - 1]
+  const max = supplyLevel ? SUPPLY_MAX_RPM[supplyLevel] : undefined
+  return rpm === undefined || max === undefined || rpm <= max
+}
+
+function setMode(next: Mode, why?: string) {
+  if (next === mode) return
+  mode = next
+  applied = undefined
+  gearApplied = undefined
+  lowerSince = undefined
+  log(`Mode: ${next === 'smart' ? 'Smart' : `Gear ${next}`}${why ? ` (${why})` : ''}`)
 }
 
 // The firmware clamps the speed to what the power supply allows; clamp here too so the
@@ -144,6 +183,8 @@ async function readSupply() {
   const max = SUPPLY_MAX_RPM[level] ?? MAX_RPM
   if (max !== maxRpm) log(`Power supply: ${SUPPLY_NAMES[level] ?? level}, max ${max} RPM`)
   maxRpm = max
+  supplyLevel = level
+  if (mode !== 'smart' && !supportedGear(mode)) setMode('smart', `the power supply can't drive gear ${mode}`)
 }
 
 async function tick() {
@@ -158,7 +199,14 @@ async function tick() {
   if (args.verbose) log(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  target ${forceOff || cold ? 'off' : `${target} RPM`}`)
 
   if (forceOff) return off || powerOff(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  force off, cooler off`)
-  if (cold) {
+  if (mode !== 'smart') {
+    // A gear ignores the temperature, so it also wakes a cooler that was off for being cold.
+    coldSince = undefined
+    if (off) {
+      off = false
+      log(`Gear ${mode}: turning the cooler on`)
+    }
+  } else if (cold) {
     coldSince ??= now
     // At startup it goes off right away; while running, only once it has stayed cold.
     if (!off && (!everOn || now - coldSince >= offDelayMs)) {
@@ -173,8 +221,11 @@ async function tick() {
     }
   }
 
+  const tickMode = mode
   if (!cooler.connected && !(await connect())) return false
-  if (stopping) return true
+  // Connecting takes seconds; if the menu changed things meanwhile, start over with fresh state.
+  if (stopping || forceOff || mode !== tickMode) return true
+  if (mode !== 'smart') return applyGear(mode, now)
 
   // Speed up at once; slow down only once the lower target has held for the down delay.
   let rpm = target
@@ -196,6 +247,30 @@ async function tick() {
   if (rpm === target) lowerSince = undefined
   applied = rpm
   appliedAt = now
+  gearApplied = undefined
+  everOn = true
+  return true
+}
+
+// Resent every REFRESH_MS like the custom speed, in case the cooler's button changed it.
+async function applyGear(gear: number, now: number) {
+  if (gearApplied === gear && now - gearAppliedAt < REFRESH_MS) return true
+  if (now - gearAppliedAt >= REFRESH_MS) await readSupply()
+  if (mode !== gear) return true // readSupply fell back to Smart
+  try {
+    await cooler.selectGear(gear)
+  } catch (err) {
+    log(message(err))
+    if (/too weak/.test(message(err))) {
+      refusedGears.add(gear)
+      setMode('smart', 'gear refused')
+    }
+    return true
+  }
+  if (gearApplied !== gear) log(`Gear ${gear}${gearRpm?.[gear - 1] ? ` → ${gearRpm[gear - 1]} RPM` : ''}`)
+  gearApplied = gear
+  gearAppliedAt = now
+  applied = undefined // Smart re-enters custom speed when chosen again
   everOn = true
   return true
 }
@@ -213,33 +288,136 @@ async function powerOff(why: string) {
   }
   off = true
   applied = undefined
+  gearApplied = undefined
   log(why)
   return true
 }
 
 function updateTray() {
+  if (!tray) return
   const { cpu, gpu, temp } = reading
+  const gearSpeed = mode === 'smart' ? undefined : gearRpm?.[mode - 1]
   const status = forceOff
     ? 'Off (forced)'
     : off
       ? `Off: below ${offBelow}°C`
       : !cooler.connected
         ? 'Connecting…'
-        : applied !== undefined
-          ? `${applied} RPM`
-          : 'Starting…'
-  const first = curve[0]![0]
-  const last = curve[curve.length - 1]![0]
-  // Where the temperature sits on the curve, from its first point to its last. A running fan
-  // always shows a sliver of ring, even at the curve's first point (lowest speed).
-  const onCurve = temp === undefined ? 1 : last > first ? (temp - first) / (last - first) : 1
-  const progress = RING_MIN + (1 - RING_MIN) * Math.min(1, Math.max(0, onCurve))
-  tray?.update({
+        : mode !== 'smart'
+          ? `Gear ${mode}${gearSpeed ? ` · ${gearSpeed} RPM` : ''}`
+          : applied !== undefined
+            ? `${applied} RPM`
+            : 'Starting…'
+  let fill: number
+  if (mode !== 'smart') {
+    // A gear has no curve: show its speed on the cooler's range instead.
+    fill = gearSpeed ? (gearSpeed - MIN_RPM) / (MAX_RPM - MIN_RPM) : 0.5
+  } else {
+    // Where the temperature sits on the curve, from its first point to its last.
+    const first = curve[0]![0]
+    const last = curve[curve.length - 1]![0]
+    fill = temp === undefined ? 1 : last > first ? (temp - first) / (last - first) : 1
+  }
+  // A running fan always shows a sliver of ring, even at the lowest speed.
+  const progress = RING_MIN + (1 - RING_MIN) * Math.min(1, Math.max(0, fill))
+  tray.update({
     progress,
     off: forceOff || off || !cooler.connected,
     tooltip: `CPU ${deg(cpu)} · GPU ${deg(gpu)} · ${status}`,
-    forceOff,
+    menu: buildMenu(),
   })
+}
+
+// Menu clicks: change the state, then let the loop act on it right away.
+function menuAction(fn: () => void) {
+  return () => {
+    if (stopping) return
+    fn()
+    updateTray()
+    wakeLoop()
+  }
+}
+
+function buildMenu(): MenuItem[] {
+  const gearLabel = (gear: number) => {
+    const rpm = gearRpm?.[gear - 1]
+    return rpm ? `Gear ${gear} · ${rpm} RPM` : `Gear ${gear}`
+  }
+  return [
+    {
+      kind: 'submenu',
+      label: `Mode: ${mode === 'smart' ? 'Smart' : `Gear ${mode}`}`,
+      items: [
+        { kind: 'radio', label: 'Smart', checked: mode === 'smart', onClick: menuAction(() => setMode('smart')) },
+        ...GEARS.map(
+          (gear): MenuItem => ({
+            kind: 'radio',
+            label: gearLabel(gear),
+            checked: mode === gear,
+            enabled: supportedGear(gear),
+            onClick: menuAction(() => setMode(gear)),
+          }),
+        ),
+      ],
+    },
+    {
+      kind: 'check',
+      label: 'Light strip',
+      checked: stripOn ?? false,
+      enabled: cooler.connected && stripOn !== undefined,
+      onClick: menuAction(() => {
+        const on = !stripOn
+        cooler
+          .setStrip(on)
+          .then(() => {
+            stripOn = on
+            log(`Light strip: ${on ? 'on' : 'off'}`)
+            updateTray()
+          })
+          .catch((err) => log(`Light strip: ${message(err)}`))
+      }),
+    },
+    {
+      kind: 'check',
+      label: 'Gear LEDs',
+      checked: gearLeds,
+      onClick: menuAction(() => {
+        gearLeds = !gearLeds
+        log(`Gear LEDs: ${gearLeds ? 'on' : 'off'}`)
+        try {
+          saveGearLeds(gearLeds)
+        } catch (err) {
+          log(`Couldn't save the gear LED setting: ${message(err)}`)
+        }
+        // Not connected: connect() applies the saved setting.
+        if (cooler.connected) cooler.setGearLeds(gearLeds).catch((err) => log(`Gear LEDs: ${message(err)}`))
+      }),
+    },
+    {
+      kind: 'check',
+      label: 'Force off',
+      checked: forceOff,
+      onClick: menuAction(() => {
+        forceOff = !forceOff
+        log(`Force off: ${forceOff ? 'on' : 'off'}`)
+      }),
+    },
+    { kind: 'separator' },
+    {
+      kind: 'action',
+      label: 'Open config file',
+      onClick: () => {
+        try {
+          ensureConfig(curve)
+        } catch (err) {
+          log(`Couldn't create ${CONFIG_PATH}: ${message(err)}`)
+        }
+        openPath(CONFIG_PATH, log)
+      },
+    },
+    { kind: 'action', label: 'Restart', onClick: () => void (stopping || shutdown('Restart', true)) },
+    { kind: 'action', label: 'Quit', onClick: () => void (stopping || shutdown('Quit')) },
+  ]
 }
 
 let wakeLoop = () => {}
@@ -252,23 +430,7 @@ const pause = (ms: number) =>
     }
   })
 
-const tray: Tray | undefined = args['no-tray']
-  ? undefined
-  : await startTray(
-      {
-        onForceOff(on) {
-          if (stopping) return
-          forceOff = on
-          log(on ? 'Force off: on' : 'Force off: off')
-          updateTray()
-          wakeLoop()
-        },
-        onQuit() {
-          if (!stopping) void shutdown('Quit')
-        },
-      },
-      log,
-    )
+const tray: Tray | undefined = args['no-tray'] ? undefined : await startTray(log)
 
 async function run() {
   while (!stopping) {
@@ -287,7 +449,17 @@ async function run() {
 
 const loop = run()
 
-async function shutdown(signal: string) {
+// Same arguments as this run. In a compiled executable argv[1] is the embedded entry point
+// (/$bunfs/...), which execPath already is; from source it's the script, which bun needs.
+function relaunch() {
+  const compiled = process.argv[1]?.startsWith('/$bunfs/') || process.argv[1]?.startsWith('B:/~BUN/')
+  const argv = process.argv.slice(compiled ? 2 : 1)
+  const child = spawn(process.execPath, argv, { stdio: 'inherit', detached: true })
+  child.unref()
+  log(`Restarted as PID ${child.pid}`)
+}
+
+async function shutdown(signal: string, restart = false) {
   if (stopping) {
     console.log('Forced exit')
     process.exit(1)
@@ -305,6 +477,7 @@ async function shutdown(signal: string) {
     log(`Turn off failed (${message(err)}), disconnected`)
   }
   tray?.close()
+  if (restart) relaunch()
   process.exit(0)
 }
 

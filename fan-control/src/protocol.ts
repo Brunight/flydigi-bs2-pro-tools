@@ -15,8 +15,13 @@ export const CMD = {
   wake: 0x05,
   supply: 0x07,
   standby: 0x0d,
+  selectGear: 0x08,
   setSpeed: 0x21,
   enterCustom: 0x23,
+  gearSpeeds: 0x27,
+  stripState: 0x45,
+  strip: 0x46,
+  gearLeds: 0x48,
 } as const
 
 export const MIN_RPM = 1300

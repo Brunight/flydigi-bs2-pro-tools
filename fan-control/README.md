@@ -34,7 +34,7 @@ Pair the cooler first (see [`../debug-dashboard`](../debug-dashboard/README.md#p
 | Option | Default | |
 |---|---|---|
 | `--curve` | saved curve, else `55:1300,65:2500,75:3200,85:4000` | °C:RPM points, straight lines between them, 1300–4000 RPM. Below the first point the cooler is off |
-| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set), then run |
+| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set), then run. The tray's Gear LEDs setting is kept there too |
 | `--interval` | `2` | Seconds between reads |
 | `--down-delay` | `10` | Seconds a lower speed must hold before the fan slows down. Speeding up is immediate |
 | `--off-delay` | `30` | Seconds it has to stay below the curve before turning off |
@@ -50,11 +50,27 @@ A fan inside a ring. The ring fills clockwise from the curve's first temperature
 even at the lowest speed; the ring is empty only when the cooler is off. The fan is greyed out while the cooler is off
 or not connected. The tooltip shows the CPU and GPU temperatures and the speed.
 
+In a gear mode the ring shows the gear's speed on the cooler's 1300–4000 RPM range instead.
+
 The menu (left or right click):
 
+- **Mode**: **Smart** follows the curve (the default at every start). **Gear 1–4** hand the
+  speed to the cooler's own gears, labelled with their RPM once connected. A gear ignores the
+  temperature, so it also turns on a cooler that was off for being cold. Gears faster than the
+  power supply allows (5 V: 2700 RPM, 9 V: 3300 RPM) are greyed out, and a gear the cooler
+  refuses falls back to Smart. The chosen gear is resent every 30 s, in case the cooler's
+  button changed it.
+- **Light strip**: on or off. Its state is read from the cooler on connect.
+- **Gear LEDs**: on or off. The cooler can't report this one, so it's saved to
+  `config.json` (`gearLeds`) and applied on every connect.
 - **Force off**: turns the cooler off and keeps it off until unchecked, whatever the
-  temperature. It's not saved: every start begins unchecked.
+  temperature or mode.
+- **Open config file**: opens `config.json` in the default app, creating it with the
+  current curve if it doesn't exist. Edits apply on restart.
+- **Restart**: turns the cooler off, then starts the program again with the same options.
 - **Quit**: same as Ctrl+C, turns the cooler off and exits.
+
+Not saved: the mode and Force off. Every start begins in Smart, with Force off unchecked.
 
 On Linux it's a StatusNotifierItem over D-Bus ([`dbus-next`](https://github.com/dbusjs/node-dbus-next)),
 which KDE, XFCE, Cinnamon and others show. GNOME needs the AppIndicator extension. With no

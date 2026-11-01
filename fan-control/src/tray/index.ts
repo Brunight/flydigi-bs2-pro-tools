@@ -2,16 +2,18 @@
 // implemented; on other platforms startTray() resolves to undefined and the program runs headless.
 import { startSni } from './sni'
 
+// Plain data, so each platform can turn it into its own menu (dbusmenu, a Windows HMENU…).
+export type MenuItem =
+  | { kind: 'action'; label: string; enabled?: boolean; onClick(): void }
+  | { kind: 'check' | 'radio'; label: string; checked: boolean; enabled?: boolean; onClick(): void }
+  | { kind: 'separator' }
+  | { kind: 'submenu'; label: string; items: MenuItem[] }
+
 export interface TrayState {
-  progress: number // position on the fan curve, 0..1
+  progress: number // ring fill, 0..1
   off: boolean // the cooler is off or not connected: greyed-out fan
   tooltip: string
-  forceOff: boolean
-}
-
-export interface TrayHandlers {
-  onForceOff(on: boolean): void
-  onQuit(): void
+  menu: MenuItem[]
 }
 
 export interface Tray {
@@ -19,10 +21,10 @@ export interface Tray {
   close(): void
 }
 
-export async function startTray(handlers: TrayHandlers, log: (text: string) => void): Promise<Tray | undefined> {
+export async function startTray(log: (text: string) => void): Promise<Tray | undefined> {
   if (process.platform !== 'linux') {
     log('No tray icon on this platform yet')
     return undefined
   }
-  return startSni(handlers, log)
+  return startSni(log)
 }

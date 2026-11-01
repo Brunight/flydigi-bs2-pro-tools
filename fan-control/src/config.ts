@@ -1,5 +1,6 @@
-// The curve saved with --save, in $XDG_CONFIG_HOME/flydigi-fan/config.json (~/.config by default).
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+// Settings in $XDG_CONFIG_HOME/flydigi-fan/config.json (~/.config by default): the curve saved
+// with --save, and the gear LED setting from the tray, which the cooler can't report back.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { formatCurve, parseCurve, type Curve } from './curve'
@@ -8,6 +9,7 @@ export const CONFIG_PATH = join(process.env.XDG_CONFIG_HOME || join(homedir(), '
 
 interface Config {
   curve?: string
+  gearLeds?: boolean
 }
 
 function read(): Config {
@@ -34,8 +36,26 @@ export function savedCurve(): Curve | undefined {
   }
 }
 
-export function saveCurve(curve: Curve) {
-  const config = { ...read(), curve: formatCurve(curve) }
+// Merges into what's there, so saving one setting keeps the others.
+function write(patch: Config) {
+  const config = { ...read(), ...patch }
   mkdirSync(join(CONFIG_PATH, '..'), { recursive: true })
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+}
+
+export function saveCurve(curve: Curve) {
+  write({ curve: formatCurve(curve) })
+}
+
+export function savedGearLeds(): boolean {
+  return read().gearLeds ?? true
+}
+
+export function saveGearLeds(on: boolean) {
+  write({ gearLeds: on })
+}
+
+// So there's something to open: writes the curve in use if the file doesn't exist yet.
+export function ensureConfig(curve: Curve) {
+  if (!existsSync(CONFIG_PATH)) saveCurve(curve)
 }

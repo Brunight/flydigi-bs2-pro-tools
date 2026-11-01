@@ -2,7 +2,7 @@
 // AppIndicator extension) with a com.canonical.dbusmenu right-click menu, over the session bus.
 import dbus from 'dbus-next'
 import { renderIcon } from './icon'
-import type { Tray, TrayHandlers, TrayState } from './index'
+import type { MenuItem, Tray, TrayState } from './index'
 
 const { Interface, ACCESS_READ } = dbus.interface
 const { Variant } = dbus
@@ -12,10 +12,6 @@ const MENU_PATH = '/MenuBar'
 const WATCHER = 'org.kde.StatusNotifierWatcher'
 const SIZES = [16, 22, 24, 32, 48, 64]
 const TITLE = 'Flydigi fan control'
-
-const MENU_FORCE_OFF = 1
-const MENU_SEPARATOR = 2
-const MENU_QUIT = 3
 
 type Pixmap = [number, number, Buffer]
 
@@ -99,37 +95,59 @@ Item.configureMembers({
 
 type Props = Record<string, InstanceType<typeof Variant>>
 
+interface MenuNode {
+  item?: MenuItem // undefined for the root
+  children: number[]
+}
+
+// com.canonical.dbusmenu over the MenuItem tree. Ids follow tree order, so they stay the same
+// while the structure does.
 class Menu extends Interface {
   revision = 1
-  forceOff = false
+  private nodes = new Map<number, MenuNode>([[0, { children: [] }]])
+  private snapshot = ''
 
-  constructor(private handlers: TrayHandlers) {
+  constructor() {
     super('com.canonical.dbusmenu')
   }
 
+  setItems(items: MenuItem[]) {
+    const nodes = new Map<number, MenuNode>()
+    let next = 1
+    const add = (list: MenuItem[]): number[] =>
+      list.map((item) => {
+        const id = next++
+        nodes.set(id, { item, children: item.kind === 'submenu' ? add(item.items) : [] })
+        return id
+      })
+    nodes.set(0, { children: add(items) })
+    // Always take the new nodes (fresh click handlers), but only tell the tray when
+    // something it shows changed.
+    this.nodes = nodes
+    const snapshot = JSON.stringify(items)
+    if (snapshot === this.snapshot) return
+    this.snapshot = snapshot
+    this.revision++
+    this.LayoutUpdated()
+  }
+
   private props(id: number): Props {
-    if (id === MENU_FORCE_OFF) {
-      return {
-        label: new Variant('s', 'Force off'),
-        'toggle-type': new Variant('s', 'checkmark'),
-        'toggle-state': new Variant('i', this.forceOff ? 1 : 0),
-      }
+    const item = this.nodes.get(id)?.item
+    if (!item) return { 'children-display': new Variant('s', 'submenu') }
+    if (item.kind === 'separator') return { type: new Variant('s', 'separator') }
+    const props: Props = { label: new Variant('s', item.label) }
+    if (item.kind === 'submenu') props['children-display'] = new Variant('s', 'submenu')
+    else props.enabled = new Variant('b', item.enabled ?? true)
+    if (item.kind === 'check' || item.kind === 'radio') {
+      props['toggle-type'] = new Variant('s', item.kind === 'check' ? 'checkmark' : 'radio')
+      props['toggle-state'] = new Variant('i', item.checked ? 1 : 0)
     }
-    if (id === MENU_SEPARATOR) return { type: new Variant('s', 'separator') }
-    if (id === MENU_QUIT) return { label: new Variant('s', 'Quit') }
-    return { 'children-display': new Variant('s', 'submenu') }
+    return props
   }
 
   private node(id: number): [number, Props, InstanceType<typeof Variant>[]] {
-    const children = id === 0 ? [MENU_FORCE_OFF, MENU_SEPARATOR, MENU_QUIT] : []
+    const children = this.nodes.get(id)?.children ?? []
     return [id, this.props(id), children.map((c) => new Variant('(ia{sv}av)', this.node(c)))]
-  }
-
-  setForceOff(on: boolean) {
-    if (on === this.forceOff) return
-    this.forceOff = on
-    this.revision++
-    this.LayoutUpdated()
   }
 
   get Version() {
@@ -148,18 +166,15 @@ class Menu extends Interface {
     return [this.revision, this.node(parentId)]
   }
   GetGroupProperties(ids: number[]) {
-    const all = ids.length ? ids : [0, MENU_FORCE_OFF, MENU_SEPARATOR, MENU_QUIT]
-    return all.map((id) => [id, this.props(id)])
+    return (ids.length ? ids : [...this.nodes.keys()]).map((id) => [id, this.props(id)])
   }
   GetProperty(id: number, name: string) {
     return this.props(id)[name] ?? new Variant('s', '')
   }
   Event(id: number, eventId: string) {
-    if (eventId !== 'clicked') return
-    if (id === MENU_FORCE_OFF) {
-      this.setForceOff(!this.forceOff)
-      this.handlers.onForceOff(this.forceOff)
-    } else if (id === MENU_QUIT) this.handlers.onQuit()
+    const item = this.nodes.get(id)?.item
+    if (eventId !== 'clicked' || !item || item.kind === 'separator' || item.kind === 'submenu') return
+    if (item.enabled ?? true) item.onClick()
   }
   EventGroup(events: [number, string, unknown, number][]) {
     for (const [id, eventId] of events) this.Event(id, eventId)
@@ -201,7 +216,7 @@ Menu.configureMembers({
   },
 })
 
-export async function startSni(handlers: TrayHandlers, log: (text: string) => void): Promise<Tray | undefined> {
+export async function startSni(log: (text: string) => void): Promise<Tray | undefined> {
   let bus: ReturnType<typeof dbus.sessionBus>
   try {
     bus = dbus.sessionBus()
@@ -213,7 +228,7 @@ export async function startSni(handlers: TrayHandlers, log: (text: string) => vo
 
   const name = `org.freedesktop.StatusNotifierItem-${process.pid}-1`
   const item = new Item('org.kde.StatusNotifierItem')
-  const menu = new Menu(handlers)
+  const menu = new Menu()
   item.icon = pixmaps(0, true)
 
   const register = async () => {
@@ -262,7 +277,7 @@ export async function startSni(handlers: TrayHandlers, log: (text: string) => vo
         item.tooltip = state.tooltip
         item.NewToolTip()
       }
-      menu.setForceOff(state.forceOff)
+      menu.setItems(state.menu)
     },
     close() {
       bus.disconnect()
