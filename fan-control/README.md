@@ -66,9 +66,10 @@ grey, made for dark panels.
 
 - **Sensors**: the CPU uses `coretemp` "Package id 0", `k10temp`/`zenpower` "Tdie"/"Tctl",
   any hwmon labelled "CPU", or the `x86_pkg_temp` thermal zone. For the GPU it reads every
-  source it finds and uses the hottest: `amdgpu`, `nouveau`, hwmon labelled "GPU" (laptop
-  EC drivers such as `legion_hwmon`) and `nvidia-smi`. If an NVIDIA dGPU is runtime-suspended,
-  `nvidia-smi` is skipped, because running it would wake the GPU and keep it awake.
+  source it finds and uses the hottest: `amdgpu`, `nouveau`, and hwmon labelled "GPU" (laptop
+  EC drivers such as `legion_hwmon`). `nvidia-smi` is only a fallback when no EC sensor reports
+  the GPU: each call costs about 1% of a core, and polling can keep the dGPU awake. Even then,
+  it's skipped while the dGPU is runtime-suspended, because running it would wake the GPU.
 - **Speed**: enters custom-speed mode (`0x23`) and sets the RPM (`0x21`), rounded to 100.
   If the cooler refuses because it left custom mode (button press, reconnect), it enters
   custom mode again. The speed is resent every 30 s anyway, and capped at what the power

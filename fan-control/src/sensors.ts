@@ -108,6 +108,7 @@ function nvidiaSensor(): Sensor | undefined {
 // Every GPU sensor found. The hottest one counts.
 function detectGpus(all: Hwmon[]): Sensor[] {
   const out: Sensor[] = []
+  let fromEc = false
   for (const h of all) {
     if (h.name === 'amdgpu' || h.name === 'nouveau') {
       const t = pick(h, 'junction', 'edge', /./) ?? h.temps[0]
@@ -116,11 +117,19 @@ function detectGpus(all: Hwmon[]): Sensor[] {
       // Laptop platform drivers (legion_hwmon, thinkpad, asus…) often read the GPU from the EC,
       // which doesn't wake a suspended dGPU.
       const t = pick(h, /\bgpu\b/i)
-      if (t) out.push(fileSensor(t.input, `${h.name} ${t.label}`))
+      if (t) {
+        out.push(fileSensor(t.input, `${h.name} ${t.label}`))
+        fromEc = true
+      }
     }
   }
-  const nv = nvidiaSensor()
-  if (nv) out.push(nv)
+  // nvidia-smi is the fallback: each call costs ~1% of a core at a 2 s interval, and polling
+  // the dGPU can keep it from runtime-suspending. An EC "GPU" sensor reads the same
+  // temperature (within 1 °C on a Legion) without touching the GPU.
+  if (!fromEc) {
+    const nv = nvidiaSensor()
+    if (nv) out.push(nv)
+  }
   return out
 }
 
