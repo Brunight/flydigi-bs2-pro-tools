@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 import { CONFIG_PATH, ensureConfig, saveCurve, saveGearLeds, savedCurve, savedGearLeds } from './config'
 import { DEFAULT_CURVE, parseCurve, rpmFor } from './curve'
 import { openPath } from './open'
+import { powerSource } from './power'
 import { MAX_RPM, MIN_RPM, SUPPLY_MAX_RPM, SUPPLY_NAMES } from './protocol'
 import { detectSensors, hottest } from './sensors'
 import { startTray, type MenuItem, type Tray } from './tray'
@@ -14,12 +15,13 @@ const HELP = `Usage: flydigi-fan [options]
 
 Connects to a Flydigi BS2 / BS2 Pro / BS3 cooler over Bluetooth and sets its fan speed from
 the hotter of the CPU and GPU. Below the curve's first temperature it turns the cooler off by
-disconnecting, and reconnects once it's warm again. Ctrl+C (or SIGTERM) turns the cooler off
-and disconnects.
+disconnecting, and reconnects once it's warm again. On battery the laptop is taken to be off
+the cooler: it leaves the cooler off and stops looking for it until mains power is back.
+Ctrl+C (or SIGTERM) turns the cooler off and disconnects.
 
 A tray icon shows where the temperature sits on the curve. Its menu switches between Smart
 (this curve) and the cooler's fixed gears, toggles the light strip and gear LEDs, forces the
-cooler off, opens the config file, restarts and quits.
+cooler off, lets it run on battery, opens the config file, restarts and quits.
 
 Options:
   --curve <t:rpm,...>   Temperature (°C) to RPM points, 1300–4000 RPM. Without it: the saved
@@ -97,6 +99,7 @@ try {
 const intervalMs = Math.max(500, seconds(args.interval, 'interval'))
 const downDelayMs = seconds(args['down-delay'], 'down-delay')
 const offDelayMs = seconds(args['off-delay'], 'off-delay')
+const onMains = await powerSource()
 // Below the curve's first point, the cooler is off.
 const offBelow = curve[0][0]
 if (!sensors.cpu.length && !sensors.gpu.length) fail('No CPU or GPU temperature sensor found. Pass --cpu or --gpu.')
@@ -117,6 +120,8 @@ let off = false // turned off (cold or forced), so stay disconnected
 let everOn = false
 let coldSince: number | undefined
 let forceOff = false // from the tray menu, never saved
+let onBattery = false
+let runOnBattery = false // from the tray menu, never saved
 let reading: { cpu?: number; gpu?: number; temp?: number } = {}
 
 // Smart follows the curve; a gear hands the speed to the cooler. Always starts as Smart.
@@ -188,6 +193,22 @@ async function readSupply() {
 }
 
 async function tick() {
+  // On battery the laptop is normally off the cooler: no readings and no scanning. A cooler
+  // still connected (unplugged while on it) is turned off. Back on mains, the code below
+  // turns it on again like after a cold spell.
+  const battery = !onMains()
+  if (battery !== onBattery) {
+    onBattery = battery
+    log(battery ? `On battery${runOnBattery ? '' : ': leaving the cooler off'}` : 'On mains power')
+  }
+  if (battery && !runOnBattery) {
+    reading = {}
+    coldSince = undefined
+    if (cooler.connected) return powerOff('On battery, cooler off')
+    off = true
+    return true
+  }
+
   const [cpu, gpu] = await Promise.all([hottest(sensors.cpu), hottest(sensors.gpu)])
   const temps = [cpu, gpu].filter((t) => t !== undefined)
   const temp = temps.length ? Math.max(...temps) : undefined
@@ -299,6 +320,8 @@ function updateTray() {
   const gearSpeed = mode === 'smart' ? undefined : gearRpm?.[mode - 1]
   const status = forceOff
     ? 'Off (forced)'
+    : onBattery && !runOnBattery
+      ? 'Off: on battery'
     : off
       ? `Off: below ${offBelow}°C`
       : !cooler.connected
@@ -400,6 +423,15 @@ function buildMenu(): MenuItem[] {
       onClick: menuAction(() => {
         forceOff = !forceOff
         log(`Force off: ${forceOff ? 'on' : 'off'}`)
+      }),
+    },
+    {
+      kind: 'check',
+      label: 'Run on battery',
+      checked: runOnBattery,
+      onClick: menuAction(() => {
+        runOnBattery = !runOnBattery
+        log(`Run on battery: ${runOnBattery ? 'on' : 'off'}`)
       }),
     },
     { kind: 'separator' },

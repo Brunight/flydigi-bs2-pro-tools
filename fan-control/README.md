@@ -2,7 +2,8 @@
 
 A single executable that keeps the cooler connected over Bluetooth and sets its fan speed
 from the hotter of the CPU and GPU. Below the curve's first temperature (55 °C by default) it
-turns the cooler off by disconnecting, and reconnects once it's warmer. A tray icon shows where the temperature sits on the curve. When it exits (Ctrl+C, SIGTERM, SIGHUP), it puts
+turns the cooler off by disconnecting, and reconnects once it's warmer. On battery it leaves
+the cooler off and stops looking for it. A tray icon shows where the temperature sits on the curve. When it exits (Ctrl+C, SIGTERM, SIGHUP), it puts
 the cooler to sleep and disconnects.
 
 Bun · TypeScript · [webbluetooth](https://github.com/thegecko/webbluetooth-rs) (BlueZ on Linux, WinRT on Windows).
@@ -92,12 +93,15 @@ The menu (left or right click):
   `config.json` (`gearLeds`) and applied on every connect.
 - **Force off**: turns the cooler off and keeps it off until unchecked, whatever the
   temperature or mode.
+- **Run on battery**: drives the cooler on battery too, for when the laptop is on the cooler
+  without its charger.
 - **Open config file**: opens `config.json` in the default app, creating it with the
   current curve if it doesn't exist. Edits apply on restart.
 - **Restart**: turns the cooler off, then starts the program again with the same options.
 - **Quit**: same as Ctrl+C, turns the cooler off and exits.
 
-Not saved: the mode and Force off. Every start begins in Smart, with Force off unchecked.
+Not saved: the mode, Force off and Run on battery. Every start begins in Smart, with both
+unchecked.
 
 On Linux it's a StatusNotifierItem over D-Bus ([`dbus-next`](https://github.com/dbusjs/node-dbus-next)),
 which KDE, XFCE, Cinnamon and others show. GNOME needs the AppIndicator extension. With no
@@ -136,6 +140,12 @@ Both draw the same icon, in code (`src/tray/icon.ts`) as plain pixels.
   off the same way it does on exit (below), then stays disconnected. At or above that
   temperature it reconnects and follows the curve again. If it's already cold at startup, it connects once
   and turns the cooler off right away, so a cooler left running gets switched off too.
+- **Battery**: on battery the laptop is normally off the cooler. A Bluetooth scan for a cooler
+  that isn't there would only drain the battery, and so would the sensor reads. So on battery
+  it turns the cooler off if it's still connected, then reads nothing and scans for nothing.
+  Within one interval of mains power coming back, it carries on as after a cold spell. Power
+  comes from `GetSystemPowerStatus` on Windows. On Linux it comes from `/sys/class/power_supply`:
+  on battery when a system battery exists and no charger (Mains, USB-C…) is online.
 - **No readings**: runs the fan at full speed.
 - **Disconnects**: it reconnects on its own, retrying every 5 s.
 - **Exit**: sets auto standby to "when disconnected" (`0x0D 01`), which is saved on the
