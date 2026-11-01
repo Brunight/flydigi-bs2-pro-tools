@@ -5,6 +5,7 @@ import { Cooler, message, sleep } from './cooler'
 import { spawn } from 'node:child_process'
 import { CONFIG_PATH, ensureConfig, saveCurve, saveGearLeds, savedCurve, savedGearLeds } from './config'
 import { DEFAULT_CURVE, parseCurve, rpmFor } from './curve'
+import { claimInstance, type Instance } from './instance'
 import { openPath } from './open'
 import { powerSource } from './power'
 import { MAX_RPM, MIN_RPM, SUPPLY_MAX_RPM, SUPPLY_NAMES } from './protocol'
@@ -84,6 +85,7 @@ if (args.help) {
 let curve: ReturnType<typeof parseCurve> = []
 let sensors: Awaited<ReturnType<typeof detectSensors>> = { cpu: [], gpu: [] }
 let gearLeds = true // saved, because the cooler can't report it
+let instance: Instance | undefined
 try {
   gearLeds = savedGearLeds()
   if (args.save && !args.curve) throw new Error('--save needs --curve')
@@ -92,6 +94,9 @@ try {
     saveCurve(curve)
     log(`Saved the curve to ${CONFIG_PATH}`)
   }
+  // After --save, so saving a curve still works while another instance runs.
+  instance = await claimInstance()
+  if (!instance) throw new Error('Already running. Quit it from its tray menu first, or use Restart there to apply a saved curve.')
   sensors = await detectSensors(args.cpu, args.gpu, log)
 } catch (err) {
   fail(message(err))
@@ -511,6 +516,8 @@ async function shutdown(signal: string, restart = false) {
     log(`Turn off failed (${message(err)}), disconnected`)
   }
   tray?.close()
+  // Before relaunching, or the new process would find this one still running.
+  instance?.release()
   if (restart) relaunch()
   process.exit(0)
 }

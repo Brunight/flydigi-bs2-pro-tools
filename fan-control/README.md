@@ -58,6 +58,8 @@ Register-ScheduledTask -TaskName 'Flydigi fan control' -Action $action -Trigger 
 The task runs whatever file is at that path, so it can point at `dist\flydigi-fan.exe`.
 Windows locks a running executable, so quit it (tray → Quit) before `bun run build`, then
 `schtasks /run /tn "Flydigi fan control"` starts the new build without logging out again.
+After a tray Restart, Task Scheduler no longer tracks the process: it only watches the one it
+started, which has exited. Running the task again then finds it already running and exits.
 
 | Option | Default | |
 |---|---|---|
@@ -148,6 +150,11 @@ Both draw the same icon, in code (`src/tray/icon.ts`) as plain pixels.
   on battery when a system battery exists and no charger (Mains, USB-C…) is online.
 - **No readings**: runs the fan at full speed.
 - **Disconnects**: it reconnects on its own, retrying every 5 s.
+- **One instance**: two would fight over the cooler, so a second start says it's already
+  running and exits. `--save` still saves the curve first, and Restart in the running one's
+  tray applies it. On Windows it's a mutex in the session, held by the running instance and
+  freed if it crashes. On Linux it's a PID file in `$XDG_RUNTIME_DIR`, replaced when the
+  process in it is gone. Restart releases it before starting the new process.
 - **Exit**: sets auto standby to "when disconnected" (`0x0D 01`), which is saved on the
   cooler, then disconnects. The cooler sleeps once no host is connected, so a USB host or
   another Bluetooth connection keeps it running. Press Ctrl+C a second time to quit at once.
