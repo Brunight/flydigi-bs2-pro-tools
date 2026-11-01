@@ -159,16 +159,26 @@ Both draw the same icon, in code (`src/tray/icon.ts`) as plain pixels.
   cooler, then disconnects. The cooler sleeps once no host is connected, so a USB host or
   another Bluetooth connection keeps it running. Press Ctrl+C a second time to quit at once.
 
+## Tested with
+
+- **Cooler**: Flydigi BS2 Pro.
+- **Laptop**: Lenovo Legion Pro 5i 16IAX10H (2025, Gen 10), Intel Core Ultra 9 275HX and
+  NVIDIA GeForce RTX 5070 Ti Laptop GPU.
+- **Linux**: CachyOS with KDE Plasma, and
+  [LenovoLegionLinux](https://github.com/johnfanv2/lenovolegionlinux) for the EC sensors
+  (`legion_hwmon`).
+- **Windows**: Windows 11, alongside
+  [Lenovo Legion Toolkit](https://github.com/LenovoLegionToolkit-Team/LenovoLegionToolkit).
+
 ## Notes
 
-- Tested on Linux (BS2 Pro, Intel CPU + NVIDIA laptop GPU): connected, read sensors, set the
-  speed, turned off when cold and back on when warm (tested with `--cpu`/`--gpu` pointed at a
-  fake temperature file), and disconnected cleanly on SIGINT/SIGTERM.
-- Tested on Windows 11 (same BS2 Pro, Legion Pro 5 16IAX10H: Core Ultra 9 275HX + RTX 5070 Ti),
-  from source and as the `--aot --trim` executable: connected without pairing, read NVML,
-  set the speed, turned off when cold, and turned off and disconnected on Ctrl+C. About
-  70 MB of memory and 1% of a core at the default interval. Elevated, the executable picked
-  the Lenovo EC for both the CPU and the GPU.
+- Tested on Linux: connected, read sensors, set the speed, turned off when cold and back on
+  when warm (tested with `--cpu`/`--gpu` pointed at a fake temperature file), and disconnected
+  cleanly on SIGINT/SIGTERM.
+- Tested on Windows, from source and as the `--aot --trim` executable: connected without
+  pairing, read NVML, set the speed, turned off when cold, and turned off and disconnected
+  on Ctrl+C. About 70 MB of memory and 1% of a core at the default interval. Elevated, the
+  executable picked the Lenovo EC for both the CPU and the GPU.
 - `patches/webbluetooth@7.1.0.patch` adds the missing `dist/uuid.js`, like in `../debug-dashboard`, and
   `dist/native.js`. `native.js` loads the native addon with a plain `require`. The stock
   napi-rs loader `require()`s a path from an env var, which stops `--trim` from removing
