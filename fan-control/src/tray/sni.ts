@@ -1,0 +1,271 @@
+// Linux tray icon: a StatusNotifierItem (KDE, and most other desktops; GNOME needs the
+// AppIndicator extension) with a com.canonical.dbusmenu right-click menu, over the session bus.
+import dbus from 'dbus-next'
+import { renderIcon } from './icon'
+import type { Tray, TrayHandlers, TrayState } from './index'
+
+const { Interface, ACCESS_READ } = dbus.interface
+const { Variant } = dbus
+
+const ITEM_PATH = '/StatusNotifierItem'
+const MENU_PATH = '/MenuBar'
+const WATCHER = 'org.kde.StatusNotifierWatcher'
+const SIZES = [16, 22, 24, 32, 48, 64]
+const TITLE = 'Flydigi fan control'
+
+const MENU_FORCE_OFF = 1
+const MENU_SEPARATOR = 2
+const MENU_QUIT = 3
+
+type Pixmap = [number, number, Buffer]
+
+// SNI wants ARGB32 in network byte order.
+function pixmaps(progress: number, off: boolean): Pixmap[] {
+  return SIZES.map((size) => {
+    const rgba = renderIcon(size, progress, off)
+    const out = Buffer.alloc(rgba.length)
+    for (let i = 0; i < rgba.length; i += 4) {
+      out[i] = rgba[i + 3]!
+      out[i + 1] = rgba[i]!
+      out[i + 2] = rgba[i + 1]!
+      out[i + 3] = rgba[i + 2]!
+    }
+    return [size, size, out]
+  })
+}
+
+const prop = (signature: string) => ({ signature, access: ACCESS_READ as typeof ACCESS_READ })
+
+class Item extends Interface {
+  icon: Pixmap[] = []
+  tooltip = ''
+
+  get Category() {
+    return 'Hardware'
+  }
+  get Id() {
+    return 'flydigi-fan'
+  }
+  get Title() {
+    return TITLE
+  }
+  get Status() {
+    return 'Active'
+  }
+  get IconName() {
+    return ''
+  }
+  get IconPixmap() {
+    return this.icon
+  }
+  get ToolTip() {
+    return ['', [], TITLE, this.tooltip]
+  }
+  // Left click opens the menu too.
+  get ItemIsMenu() {
+    return true
+  }
+  get Menu() {
+    return MENU_PATH
+  }
+  Activate() {}
+  SecondaryActivate() {}
+  ContextMenu() {}
+  Scroll() {}
+  NewIcon() {}
+  NewToolTip() {}
+}
+
+Item.configureMembers({
+  properties: {
+    Category: prop('s'),
+    Id: prop('s'),
+    Title: prop('s'),
+    Status: prop('s'),
+    IconName: prop('s'),
+    IconPixmap: prop('a(iiay)'),
+    ToolTip: prop('(sa(iiay)ss)'),
+    ItemIsMenu: prop('b'),
+    Menu: prop('o'),
+  },
+  methods: {
+    Activate: { inSignature: 'ii' },
+    SecondaryActivate: { inSignature: 'ii' },
+    ContextMenu: { inSignature: 'ii' },
+    Scroll: { inSignature: 'is' },
+  },
+  signals: { NewIcon: { signature: '' }, NewToolTip: { signature: '' } },
+})
+
+type Props = Record<string, InstanceType<typeof Variant>>
+
+class Menu extends Interface {
+  revision = 1
+  forceOff = false
+
+  constructor(private handlers: TrayHandlers) {
+    super('com.canonical.dbusmenu')
+  }
+
+  private props(id: number): Props {
+    if (id === MENU_FORCE_OFF) {
+      return {
+        label: new Variant('s', 'Force off'),
+        'toggle-type': new Variant('s', 'checkmark'),
+        'toggle-state': new Variant('i', this.forceOff ? 1 : 0),
+      }
+    }
+    if (id === MENU_SEPARATOR) return { type: new Variant('s', 'separator') }
+    if (id === MENU_QUIT) return { label: new Variant('s', 'Quit') }
+    return { 'children-display': new Variant('s', 'submenu') }
+  }
+
+  private node(id: number): [number, Props, InstanceType<typeof Variant>[]] {
+    const children = id === 0 ? [MENU_FORCE_OFF, MENU_SEPARATOR, MENU_QUIT] : []
+    return [id, this.props(id), children.map((c) => new Variant('(ia{sv}av)', this.node(c)))]
+  }
+
+  setForceOff(on: boolean) {
+    if (on === this.forceOff) return
+    this.forceOff = on
+    this.revision++
+    this.LayoutUpdated()
+  }
+
+  get Version() {
+    return 3
+  }
+  get TextDirection() {
+    return 'ltr'
+  }
+  get Status() {
+    return 'normal'
+  }
+  get IconThemePath() {
+    return []
+  }
+  GetLayout(parentId: number) {
+    return [this.revision, this.node(parentId)]
+  }
+  GetGroupProperties(ids: number[]) {
+    const all = ids.length ? ids : [0, MENU_FORCE_OFF, MENU_SEPARATOR, MENU_QUIT]
+    return all.map((id) => [id, this.props(id)])
+  }
+  GetProperty(id: number, name: string) {
+    return this.props(id)[name] ?? new Variant('s', '')
+  }
+  Event(id: number, eventId: string) {
+    if (eventId !== 'clicked') return
+    if (id === MENU_FORCE_OFF) {
+      this.setForceOff(!this.forceOff)
+      this.handlers.onForceOff(this.forceOff)
+    } else if (id === MENU_QUIT) this.handlers.onQuit()
+  }
+  EventGroup(events: [number, string, unknown, number][]) {
+    for (const [id, eventId] of events) this.Event(id, eventId)
+    return []
+  }
+  AboutToShow() {
+    return false
+  }
+  AboutToShowGroup() {
+    return [[], []]
+  }
+  LayoutUpdated() {
+    return [this.revision, 0]
+  }
+  ItemsPropertiesUpdated() {
+    return [[], []]
+  }
+}
+
+Menu.configureMembers({
+  properties: {
+    Version: prop('u'),
+    TextDirection: prop('s'),
+    Status: prop('s'),
+    IconThemePath: prop('as'),
+  },
+  methods: {
+    GetLayout: { inSignature: 'iias', outSignature: 'u(ia{sv}av)' },
+    GetGroupProperties: { inSignature: 'aias', outSignature: 'a(ia{sv})' },
+    GetProperty: { inSignature: 'is', outSignature: 'v' },
+    Event: { inSignature: 'isvu' },
+    EventGroup: { inSignature: 'a(isvu)', outSignature: 'ai' },
+    AboutToShow: { inSignature: 'i', outSignature: 'b' },
+    AboutToShowGroup: { inSignature: 'ai', outSignature: 'aiai' },
+  },
+  signals: {
+    LayoutUpdated: { signature: 'ui' },
+    ItemsPropertiesUpdated: { signature: 'a(ia{sv})a(ias)' },
+  },
+})
+
+export async function startSni(handlers: TrayHandlers, log: (text: string) => void): Promise<Tray | undefined> {
+  let bus: ReturnType<typeof dbus.sessionBus>
+  try {
+    bus = dbus.sessionBus()
+  } catch (err) {
+    log(`No tray icon: ${err instanceof Error ? err.message : err}`)
+    return undefined
+  }
+  bus.on('error', (err) => log(`Tray: ${err instanceof Error ? err.message : err}`))
+
+  const name = `org.freedesktop.StatusNotifierItem-${process.pid}-1`
+  const item = new Item('org.kde.StatusNotifierItem')
+  const menu = new Menu(handlers)
+  item.icon = pixmaps(0, true)
+
+  const register = async () => {
+    const watcher = await bus.getProxyObject(WATCHER, '/StatusNotifierWatcher')
+    await watcher.getInterface(WATCHER).RegisterStatusNotifierItem!(name)
+  }
+  try {
+    bus.export(ITEM_PATH, item)
+    bus.export(MENU_PATH, menu)
+    await bus.requestName(name, 0)
+    await register()
+  } catch (err) {
+    log(`No tray icon: no system tray found (${err instanceof Error ? err.message : err})`)
+    bus.disconnect()
+    return undefined
+  }
+
+  // The tray forgets every item when the panel restarts, so register again when it's back.
+  try {
+    const busObject = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
+    busObject.getInterface('org.freedesktop.DBus').on('NameOwnerChanged', (owner: string, _old: string, now: string) => {
+      if (owner === WATCHER && now) register().catch(() => {})
+    })
+  } catch {}
+
+  let iconKey = ''
+  // Temperatures hover around a few values, so keep recent icons instead of redrawing them.
+  const recent = new Map<string, Pixmap[]>()
+  return {
+    update(state: TrayState) {
+      // Redraw only when the picture changes; 1 % steps are finer than 64 px can show.
+      const progress = state.off ? 0 : Math.min(1, Math.max(0, state.progress))
+      const key = `${state.off}:${Math.round(progress * 100)}`
+      if (key !== iconKey) {
+        iconKey = key
+        let icon = recent.get(key)
+        if (!icon) {
+          icon = pixmaps(progress, state.off)
+          if (recent.size >= 32) recent.delete(recent.keys().next().value!)
+          recent.set(key, icon)
+        }
+        item.icon = icon
+        item.NewIcon()
+      }
+      if (state.tooltip !== item.tooltip) {
+        item.tooltip = state.tooltip
+        item.NewToolTip()
+      }
+      menu.setForceOff(state.forceOff)
+    },
+    close() {
+      bus.disconnect()
+    },
+  }
+}

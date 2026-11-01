@@ -9,6 +9,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "dbus-next": "^0.10.2",
     "webbluetooth": "^7.1.0"
   },
   "devDependencies": {
@@ -17,6 +18,8 @@
     "typescript": "^6.0.2"
   },
   "patchedDependencies": {
-    "webbluetooth@7.1.0": "patches/webbluetooth@7.1.0.patch"
+    "webbluetooth@7.1.0": "patches/webbluetooth@7.1.0.patch",
+    "dbus-next@0.10.2": "patches/dbus-next@0.10.2.patch",
+    "xmlbuilder@11.0.1": "patches/xmlbuilder@11.0.1.patch"
   }
 }

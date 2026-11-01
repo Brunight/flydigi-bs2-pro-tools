@@ -1,0 +1,16 @@
+diff --git a/lib/Utility.js b/lib/Utility.js
+index 1d42cfd312388742a4f062bf6d9ac62a460f82c1..e83f78891880f4915e1bc064ea0652f04cca0260 100644
+--- a/lib/Utility.js
++++ b/lib/Utility.js
+@@ -54,8 +54,9 @@
+   };
+ 
+   isPlainObject = function(val) {
+-    var ctor, proto;
+-    return isObject(val) && (proto = Object.getPrototypeOf(val)) && (ctor = proto.constructor) && (typeof ctor === 'function') && (ctor instanceof ctor) && (Function.prototype.toString.call(ctor) === Function.prototype.toString.call(Object));
++    // Was a Function.prototype.toString comparison of proto.constructor, which stops
++    // `bun build --trim` from removing unused APIs.
++    return isObject(val) && Object.getPrototypeOf(val) === Object.prototype;
+   };
+ 
+   getValue = function(obj) {

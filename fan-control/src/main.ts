@@ -6,6 +6,7 @@ import { CONFIG_PATH, saveCurve, savedCurve } from './config'
 import { DEFAULT_CURVE, parseCurve, rpmFor } from './curve'
 import { MAX_RPM, SUPPLY_MAX_RPM, SUPPLY_NAMES } from './protocol'
 import { detectSensors, hottest } from './sensors'
+import { startTray, type Tray } from './tray'
 
 const HELP = `Usage: flydigi-fan [options]
 
@@ -13,6 +14,9 @@ Connects to a Flydigi BS2 / BS2 Pro / BS3 cooler over Bluetooth and sets its fan
 the hotter of the CPU and GPU. Below the curve's first temperature it turns the cooler off by
 disconnecting, and reconnects once it's warm again. Ctrl+C (or SIGTERM) turns the cooler off
 and disconnects.
+
+A tray icon shows where the temperature sits on the curve. Its menu has "Force off", which
+keeps the cooler off until unchecked (not saved), and "Quit".
 
 Options:
   --curve <t:rpm,...>   Temperature (°C) to RPM points, 1300–4000 RPM. Without it: the saved
@@ -25,6 +29,7 @@ Options:
   --cpu <path,...>      CPU temperature files in millidegrees, instead of auto-detection
   --gpu <path,...>      GPU temperature files in millidegrees, instead of auto-detection
   --verbose             Print every reading, not only speed changes
+  --no-tray             Don't show a tray icon
   -h, --help            Show this help
 
 Env: COOLER_NAME works like --name.`
@@ -35,6 +40,8 @@ const REFRESH_MS = 30_000
 const RETRY_MS = 5_000
 const SCAN_SECONDS = 10
 const SHUTDOWN_TIMEOUT_MS = 5_000
+// Share of the tray ring shown at the lowest speed.
+const RING_MIN = 0.05
 
 const { values: args } = parseArgs({
   options: {
@@ -47,6 +54,7 @@ const { values: args } = parseArgs({
     cpu: { type: 'string' },
     gpu: { type: 'string' },
     verbose: { type: 'boolean', default: false },
+    'no-tray': { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
 })
@@ -100,9 +108,11 @@ let applied: number | undefined // RPM the cooler was last told
 let appliedAt = 0
 let lowerSince: number | undefined
 let maxRpm = MAX_RPM
-let off = false // turned off for being cold, so stay disconnected
+let off = false // turned off (cold or forced), so stay disconnected
 let everOn = false
 let coldSince: number | undefined
+let forceOff = false // from the tray menu, never saved
+let reading: { cpu?: number; gpu?: number; temp?: number } = {}
 
 const cooler = new Cooler(match, SCAN_SECONDS, () => {
   applied = undefined
@@ -144,12 +154,16 @@ async function tick() {
   const target = Math.min(temp === undefined ? MAX_RPM : rpmFor(curve, temp), maxRpm)
   const now = Date.now()
   const cold = temp !== undefined && temp < offBelow
-  if (args.verbose) log(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  target ${cold ? 'off' : `${target} RPM`}`)
+  reading = { cpu, gpu, temp }
+  if (args.verbose) log(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  target ${forceOff || cold ? 'off' : `${target} RPM`}`)
 
+  if (forceOff) return off || powerOff(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  force off, cooler off`)
   if (cold) {
     coldSince ??= now
     // At startup it goes off right away; while running, only once it has stayed cold.
-    if (!off && (!everOn || now - coldSince >= offDelayMs)) return turnOffCold(cpu, gpu)
+    if (!off && (!everOn || now - coldSince >= offDelayMs)) {
+      return powerOff(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  < ${offBelow}°C, cooler off`)
+    }
     if (off) return true
   } else {
     coldSince = undefined
@@ -188,7 +202,7 @@ async function tick() {
 
 // Connects first if needed: a cooler left awake by an earlier run only sleeps once auto
 // standby is set and the link drops.
-async function turnOffCold(cpu: number | undefined, gpu: number | undefined) {
+async function powerOff(why: string) {
   if (!cooler.connected && !(await connect())) return false
   if (stopping) return true
   try {
@@ -199,8 +213,33 @@ async function turnOffCold(cpu: number | undefined, gpu: number | undefined) {
   }
   off = true
   applied = undefined
-  log(`CPU ${deg(cpu)}  GPU ${deg(gpu)}  < ${offBelow}°C, cooler off`)
+  log(why)
   return true
+}
+
+function updateTray() {
+  const { cpu, gpu, temp } = reading
+  const status = forceOff
+    ? 'Off (forced)'
+    : off
+      ? `Off: below ${offBelow}°C`
+      : !cooler.connected
+        ? 'Connecting…'
+        : applied !== undefined
+          ? `${applied} RPM`
+          : 'Starting…'
+  const first = curve[0]![0]
+  const last = curve[curve.length - 1]![0]
+  // Where the temperature sits on the curve, from its first point to its last. A running fan
+  // always shows a sliver of ring, even at the curve's first point (lowest speed).
+  const onCurve = temp === undefined ? 1 : last > first ? (temp - first) / (last - first) : 1
+  const progress = RING_MIN + (1 - RING_MIN) * Math.min(1, Math.max(0, onCurve))
+  tray?.update({
+    progress,
+    off: forceOff || off || !cooler.connected,
+    tooltip: `CPU ${deg(cpu)} · GPU ${deg(gpu)} · ${status}`,
+    forceOff,
+  })
 }
 
 let wakeLoop = () => {}
@@ -213,6 +252,24 @@ const pause = (ms: number) =>
     }
   })
 
+const tray: Tray | undefined = args['no-tray']
+  ? undefined
+  : await startTray(
+      {
+        onForceOff(on) {
+          if (stopping) return
+          forceOff = on
+          log(on ? 'Force off: on' : 'Force off: off')
+          updateTray()
+          wakeLoop()
+        },
+        onQuit() {
+          if (!stopping) void shutdown('Quit')
+        },
+      },
+      log,
+    )
+
 async function run() {
   while (!stopping) {
     const started = Date.now()
@@ -222,6 +279,7 @@ async function run() {
     } catch (err) {
       log(`Error: ${message(err)}`)
     }
+    updateTray()
     if (stopping) break
     await pause(ok ? Math.max(0, intervalMs - (Date.now() - started)) : RETRY_MS)
   }
@@ -246,6 +304,7 @@ async function shutdown(signal: string) {
     cooler.disconnect()
     log(`Turn off failed (${message(err)}), disconnected`)
   }
+  tray?.close()
   process.exit(0)
 }
 

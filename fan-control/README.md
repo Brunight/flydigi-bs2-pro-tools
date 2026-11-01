@@ -2,7 +2,7 @@
 
 A single executable that keeps the cooler connected over Bluetooth and sets its fan speed
 from the hotter of the CPU and GPU. Below the curve's first temperature (55 °C by default) it
-turns the cooler off by disconnecting, and reconnects once it's warmer. No UI. When it exits (Ctrl+C, SIGTERM, SIGHUP), it puts
+turns the cooler off by disconnecting, and reconnects once it's warmer. A tray icon shows where the temperature sits on the curve. When it exits (Ctrl+C, SIGTERM, SIGHUP), it puts
 the cooler to sleep and disconnects.
 
 Bun · TypeScript · [webbluetooth](https://github.com/thegecko/webbluetooth-rs) (BlueZ on Linux).
@@ -41,6 +41,26 @@ Pair the cooler first (see [`../debug-dashboard`](../debug-dashboard/README.md#p
 | `--name` / `COOLER_NAME` | anything like `FlyDigi BS2PRO` | Exact Bluetooth name |
 | `--cpu`, `--gpu` | auto | Comma-separated sysfs temperature files (millidegrees) |
 | `--verbose` | off | Print every reading |
+| `--no-tray` | | No tray icon |
+
+## Tray icon
+
+A fan inside a ring. The ring fills clockwise from the curve's first temperature to its last
+(full), and shifts green → amber → red. While the fan runs there's always a short green arc,
+even at the lowest speed; the ring is empty only when the cooler is off. The fan is greyed out while the cooler is off
+or not connected. The tooltip shows the CPU and GPU temperatures and the speed.
+
+The menu (left or right click):
+
+- **Force off**: turns the cooler off and keeps it off until unchecked, whatever the
+  temperature. It's not saved: every start begins unchecked.
+- **Quit**: same as Ctrl+C, turns the cooler off and exits.
+
+On Linux it's a StatusNotifierItem over D-Bus ([`dbus-next`](https://github.com/dbusjs/node-dbus-next)),
+which KDE, XFCE, Cinnamon and others show. GNOME needs the AppIndicator extension. With no
+tray available it logs that and keeps running. The icon is drawn in code (`src/tray/icon.ts`)
+as plain pixels, so a Windows tray can reuse it. Windows has no tray yet. The fan is light
+grey, made for dark panels.
 
 ## How it works
 
@@ -72,4 +92,7 @@ Pair the cooler first (see [`../debug-dashboard`](../debug-dashboard/README.md#p
   `dist/native.js`. `native.js` loads the native addon with a plain `require`. The stock
   napi-rs loader `require()`s a path from an env var, which stops `--trim` from removing
   unused APIs. The patched loader only covers Linux x64 (glibc) and Windows x64.
-- `--trim` still keeps some APIs, because the program loads a native addon.
+- `patches/dbus-next@0.10.2.patch` drops the optional `usocket` native addon (plain Unix
+  sockets are enough), and `patches/xmlbuilder@11.0.1.patch` replaces a
+  `Function.prototype.toString` check. Both stopped `--trim` from removing unused APIs.
+- `--trim` still keeps some APIs, because the program loads the Bluetooth native addon.
