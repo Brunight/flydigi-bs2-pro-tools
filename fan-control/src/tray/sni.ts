@@ -106,6 +106,7 @@ class Menu extends Interface {
   revision = 1
   private nodes = new Map<number, MenuNode>([[0, { children: [] }]])
   private snapshot = ''
+  private structure = ''
 
   constructor() {
     super('com.canonical.dbusmenu')
@@ -122,13 +123,21 @@ class Menu extends Interface {
       })
     nodes.set(0, { children: add(items) })
     // Always take the new nodes (fresh click handlers), but only tell the tray when
-    // something it shows changed.
+    // something it shows changed. LayoutUpdated covers the tree; Plasma keeps its cached
+    // check and enabled states unless ItemsPropertiesUpdated says otherwise.
     this.nodes = nodes
     const snapshot = JSON.stringify(items)
     if (snapshot === this.snapshot) return
     this.snapshot = snapshot
-    this.revision++
-    this.LayoutUpdated()
+    const structure = JSON.stringify(items, (key, value) =>
+      key === 'label' || key === 'checked' || key === 'enabled' ? undefined : value,
+    )
+    if (structure !== this.structure) {
+      this.structure = structure
+      this.revision++
+      this.LayoutUpdated()
+    }
+    this.ItemsPropertiesUpdated()
   }
 
   private props(id: number): Props {
@@ -175,6 +184,9 @@ class Menu extends Interface {
     const item = this.nodes.get(id)?.item
     if (eventId !== 'clicked' || !item || item.kind === 'separator' || item.kind === 'submenu') return
     if (item.enabled ?? true) item.onClick()
+    // Plasma flips a check or radio item itself when it's clicked, and doesn't group radios.
+    // Send every item's real state back, even if the click changed nothing.
+    this.ItemsPropertiesUpdated()
   }
   EventGroup(events: [number, string, unknown, number][]) {
     for (const [id, eventId] of events) this.Event(id, eventId)
@@ -190,7 +202,8 @@ class Menu extends Interface {
     return [this.revision, 0]
   }
   ItemsPropertiesUpdated() {
-    return [[], []]
+    const updated = [...this.nodes.keys()].filter((id) => id !== 0).map((id) => [id, this.props(id)])
+    return [updated, []]
   }
 }
 

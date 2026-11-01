@@ -431,6 +431,8 @@ const pause = (ms: number) =>
   })
 
 const tray: Tray | undefined = args['no-tray'] ? undefined : await startTray(log)
+// The first tick can spend seconds connecting; show the menu before that.
+updateTray()
 
 async function run() {
   while (!stopping) {
