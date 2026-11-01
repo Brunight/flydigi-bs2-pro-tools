@@ -1,0 +1,22 @@
+{
+  "name": "flydigi-fan-control",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "build": "bun build --compile --aot --trim --outfile dist/flydigi-fan src/main.ts",
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "webbluetooth": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/web-bluetooth": "^0.0.22",
+    "typescript": "^6.0.2"
+  },
+  "patchedDependencies": {
+    "webbluetooth@7.1.0": "patches/webbluetooth@7.1.0.patch"
+  }
+}

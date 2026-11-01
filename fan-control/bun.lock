@@ -1,0 +1,57 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "flydigi-fan-control",
+      "dependencies": {
+        "webbluetooth": "^7.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "@types/web-bluetooth": "^0.0.22",
+        "typescript": "^6.0.2",
+      },
+    },
+  },
+  "patchedDependencies": {
+    "webbluetooth@7.1.0": "patches/webbluetooth@7.1.0.patch",
+  },
+  "packages": {
+    "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
+
+    "@types/node": ["@types/node@26.6.6", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog=="],
+
+    "@types/web-bluetooth": ["@types/web-bluetooth@0.0.22", "", {}, "sha512-4O7kU0Ut0irZvFyk3EvgDrzFYBQI80Puhkb65I7eV6WTZX4iOo5zoDrEfjDBRB7x5Stz31csoHO4hAjSiRTALw=="],
+
+    "@webbluetooth/webbluetooth-darwin-arm64": ["@webbluetooth/webbluetooth-darwin-arm64@7.1.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-KHWLt/T7aJJEXbtH8BRYarKMHsoZquRGaMmFuGXdY8kyMYMXSQFBQDGvKt9YuUSLmYwvYR5Q3drhMsPbNacV9A=="],
+
+    "@webbluetooth/webbluetooth-darwin-x64": ["@webbluetooth/webbluetooth-darwin-x64@7.1.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-CUOsTczZwwsih/G2b99Z4ratmT1Gc3CLFAx0fPlYa6I/Bs+6g7u0wqSLh93tLf3csR1U5oJ7Ur9xdXAZ926IqQ=="],
+
+    "@webbluetooth/webbluetooth-linux-arm-gnueabihf": ["@webbluetooth/webbluetooth-linux-arm-gnueabihf@7.1.0", "", { "os": "linux", "cpu": "arm" }, "sha512-rj4LUlokDw+xT3GjOQpDutUnWRXSMoYw2elUTFIQGt0JxdJxXbnnjSYDbeXlxAUQAejj5Xym1acKKve7RlQSqA=="],
+
+    "@webbluetooth/webbluetooth-linux-arm64-gnu": ["@webbluetooth/webbluetooth-linux-arm64-gnu@7.1.0", "", { "os": "linux", "cpu": "arm64", "libc": "glibc" }, "sha512-HhNZp4+ZLvU6WN+jomuhdWwOfiCBVzrQNrLlEIuqWH/kuw0Q2Q3yk77sFGvpkMngnP8PzPGzNv+ZmbqYARwzAA=="],
+
+    "@webbluetooth/webbluetooth-linux-arm64-musl": ["@webbluetooth/webbluetooth-linux-arm64-musl@7.1.0", "", { "os": "linux", "cpu": "arm64", "libc": "musl" }, "sha512-smLukcDUXGJJrde9LHZx0QBEToqpMLVsU0Rz7FtfExMluOJHeJy/cfHyJ0StygWNepzIPhibjaQk5+pZsIkNTA=="],
+
+    "@webbluetooth/webbluetooth-linux-x64-gnu": ["@webbluetooth/webbluetooth-linux-x64-gnu@7.1.0", "", { "os": "linux", "cpu": "x64", "libc": "glibc" }, "sha512-aaDo1Bk9/dMFGtLwYXNp3XViN6c/ckj6+rjJVtqIfSDvWB7T22OdT6fGbmQDfvUUGizLpd8MYzN9Y8zYfTe05Q=="],
+
+    "@webbluetooth/webbluetooth-linux-x64-musl": ["@webbluetooth/webbluetooth-linux-x64-musl@7.1.0", "", { "os": "linux", "cpu": "x64", "libc": "musl" }, "sha512-DXXiOBOg7VNvpVMvBuYgTgokk1MSuQSvsd5gIi8YsutnrtaohGWkAU1DX5wDef7mTU7n6iez7++4RLQNJkzjhA=="],
+
+    "@webbluetooth/webbluetooth-win32-arm64-msvc": ["@webbluetooth/webbluetooth-win32-arm64-msvc@7.1.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-KSomJcWmdLF8KXR2dy8+x4M4YcziVZmpLonDv+PEQIpsDVJRsir5JletOjzt/AGVTcFtFnhW+d3hFsLWfXrGSg=="],
+
+    "@webbluetooth/webbluetooth-win32-ia32-msvc": ["@webbluetooth/webbluetooth-win32-ia32-msvc@7.1.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-PCO15c+gUKY2yd67Xbcb09wLDgUBmrUOfPOeuqpP0sA0dMLDY/yqtGbx/sSSmWWrLFWJa4gesNi14F6YkOWFTw=="],
+
+    "@webbluetooth/webbluetooth-win32-x64-msvc": ["@webbluetooth/webbluetooth-win32-x64-msvc@7.1.0", "", { "os": "win32", "cpu": "x64" }, "sha512-u3evpQ3eE5gbU9cGYhl/Ca+BMggwuxQWigiJOQGP3gtwiFK1INtvENhkBdoFcupYnfTK60f1hgbZ9hdVj3I5Vg=="],
+
+    "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "webbluetooth": ["webbluetooth@7.1.0", "", { "dependencies": { "@types/web-bluetooth": "^0.0.21" }, "optionalDependencies": { "@webbluetooth/webbluetooth-darwin-arm64": "7.1.0", "@webbluetooth/webbluetooth-darwin-x64": "7.1.0", "@webbluetooth/webbluetooth-linux-arm-gnueabihf": "7.1.0", "@webbluetooth/webbluetooth-linux-arm64-gnu": "7.1.0", "@webbluetooth/webbluetooth-linux-arm64-musl": "7.1.0", "@webbluetooth/webbluetooth-linux-x64-gnu": "7.1.0", "@webbluetooth/webbluetooth-linux-x64-musl": "7.1.0", "@webbluetooth/webbluetooth-win32-arm64-msvc": "7.1.0", "@webbluetooth/webbluetooth-win32-ia32-msvc": "7.1.0", "@webbluetooth/webbluetooth-win32-x64-msvc": "7.1.0" } }, "sha512-xTXnAv/JdjtUG1+2Glm8DMtQzJ553nLLNB02Xvf5Tou2H48ztWV3dehxUoi3H0lJGQWXLPZtGVukqiefuzVzYA=="],
+
+    "webbluetooth/@types/web-bluetooth": ["@types/web-bluetooth@0.0.21", "", {}, "sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA=="],
+  }
+}
