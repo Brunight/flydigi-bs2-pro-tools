@@ -5,7 +5,8 @@ from the hotter of the CPU and GPU. Below the curve's first temperature (55 °C 
 turns the cooler off by disconnecting, and reconnects once it's warmer. A tray icon shows where the temperature sits on the curve. When it exits (Ctrl+C, SIGTERM, SIGHUP), it puts
 the cooler to sleep and disconnects.
 
-Bun · TypeScript · [webbluetooth](https://github.com/thegecko/webbluetooth-rs) (BlueZ on Linux).
+Bun · TypeScript · [webbluetooth](https://github.com/thegecko/webbluetooth-rs) (BlueZ on Linux, WinRT on Windows).
+Runs on Linux and Windows (x64).
 The protocol and Bluetooth code are cut down from [`../debug-dashboard`](../debug-dashboard/README.md).
 
 ## Build
@@ -15,10 +16,18 @@ The protocol and Bluetooth code are cut down from [`../debug-dashboard`](../debu
 ```sh
 bun upgrade --canary
 bun install
-bun run build        # bun build --compile --aot --trim → dist/flydigi-fan
+bun run build        # bun build --compile --aot --trim → dist/flydigi-fan (.exe on Windows)
 ```
 
 `bun run start` runs it from source without building. `bun test` covers the curve and frames.
+
+Build on the platform you're building for: `--aot` can't cross-compile. Each build only holds
+its own platform's code. `--compile --target` replaces `process.platform` with the target's
+value (same as `--define process.platform:'"win32"'`), the bundler folds the checks, and drops
+the other platform's `import()`. So the Windows executable has no dbus-next, and the Linux one
+has no Win32 code. To keep it that way, write platform checks inline next to a dynamic
+`import()` (as in `src/tray/index.ts` and `src/sensors/index.ts`). A `const isWindows = …`
+in between isn't folded through.
 
 ## Run
 
@@ -29,17 +38,35 @@ bun run build        # bun build --compile --aot --trim → dist/flydigi-fan
 ./dist/flydigi-fan --help
 ```
 
-Pair the cooler first (see [`../debug-dashboard`](../debug-dashboard/README.md#pair-the-cooler-first)).
+Pair the cooler first on Linux (see [`../debug-dashboard`](../debug-dashboard/README.md#pair-the-cooler-first)).
+Windows connects to it without pairing.
+
+On Windows, the CPU temperature needs administrator rights (see [Sensors](#how-it-works)).
+Without them it runs on the GPU temperature alone and says so. To start it elevated at
+logon without a UAC prompt, add a scheduled task from an elevated PowerShell. Use these
+settings rather than plain `schtasks /create`. By default a task only starts on AC power,
+stops when the laptop switches to battery, and is killed after 72 hours:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'C:\path\to\flydigi-fan.exe'
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+Register-ScheduledTask -TaskName 'Flydigi fan control' -Action $action -Trigger $trigger -Settings $settings -User $env:USERNAME -RunLevel Highest
+```
+
+The task runs whatever file is at that path, so it can point at `dist\flydigi-fan.exe`.
+Windows locks a running executable, so quit it (tray → Quit) before `bun run build`, then
+`schtasks /run /tn "Flydigi fan control"` starts the new build without logging out again.
 
 | Option | Default | |
 |---|---|---|
 | `--curve` | saved curve, else `55:1300,65:2500,75:3200,85:4000` | °C:RPM points, straight lines between them, 1300–4000 RPM. Below the first point the cooler is off |
-| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set), then run. The tray's Gear LEDs setting is kept there too |
+| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set; `%APPDATA%lydigi-fannfig.json` on Windows), then run. The tray's Gear LEDs setting is kept there too |
 | `--interval` | `2` | Seconds between reads |
 | `--down-delay` | `10` | Seconds a lower speed must hold before the fan slows down. Speeding up is immediate |
 | `--off-delay` | `30` | Seconds it has to stay below the curve before turning off |
 | `--name` / `COOLER_NAME` | anything like `FlyDigi BS2PRO` | Exact Bluetooth name |
-| `--cpu`, `--gpu` | auto | Comma-separated sysfs temperature files (millidegrees) |
+| `--cpu`, `--gpu` | auto | Comma-separated temperature files in millidegrees, like sysfs (any file works, on Windows too) |
 | `--verbose` | off | Print every reading |
 | `--no-tray` | | No tray icon |
 
@@ -74,9 +101,15 @@ Not saved: the mode and Force off. Every start begins in Smart, with Force off u
 
 On Linux it's a StatusNotifierItem over D-Bus ([`dbus-next`](https://github.com/dbusjs/node-dbus-next)),
 which KDE, XFCE, Cinnamon and others show. GNOME needs the AppIndicator extension. With no
-tray available it logs that and keeps running. The icon is drawn in code (`src/tray/icon.ts`)
-as plain pixels, so a Windows tray can reuse it. Windows has no tray yet. The fan is light
-grey, made for dark panels.
+tray available it logs that and keeps running. The fan is light grey, made for dark panels.
+
+On Windows it's `Shell_NotifyIconW` on a hidden window, through `bun:ffi` (`src/tray/win32.ts`),
+with a native popup menu. The fan is dark grey on a light taskbar and follows theme changes.
+New icons start in the taskbar's overflow; drag it out to keep it visible. Bun's event loop
+doesn't run a Windows message loop, so the window's messages are pumped every 100 ms. While
+the menu is open, Windows runs its own loop and the program waits for the menu to close.
+
+Both draw the same icon, in code (`src/tray/icon.ts`) as plain pixels.
 
 ## How it works
 
@@ -86,6 +119,15 @@ grey, made for dark panels.
   EC drivers such as `legion_hwmon`). `nvidia-smi` is only a fallback when no EC sensor reports
   the GPU: each call costs about 1% of a core, and polling can keep the dGPU awake. Even then,
   it's skipped while the dGPU is runtime-suspended, because running it would wake the GPU.
+- **Sensors on Windows**: Lenovo Legion laptops report the CPU and GPU from the EC over WMI,
+  the same readings as `legion_hwmon`: `LENOVO_OTHER_METHOD.GetFeatureValue` on 2024+ models
+  (IDs `0x05040000`/`0x05050000`, about 5 ms each), else `LENOVO_GAMEZONE_DATA.GetCPUTemp`/`GetGPUTemp`.
+  That needs administrator rights. The WMI calls go over COM through `bun:ffi` (`src/win32/wmi.ts`), with no
+  PowerShell. Other machines have no CPU temperature on Windows without a kernel driver.
+  When the EC doesn't report the GPU, an NVIDIA GPU is read through NVML (`nvml.dll`,
+  installed with the driver). NVML is opened and shut down for each read, about 12 ms, and
+  skipped while the dGPU isn't in D0. The power state comes from the PnP manager, which
+  doesn't wake the GPU.
 - **Speed**: enters custom-speed mode (`0x23`) and sets the RPM (`0x21`), rounded to 100.
   If the cooler refuses because it left custom mode (button press, reconnect), it enters
   custom mode again. The speed is resent every 30 s anyway, and capped at what the power
@@ -105,6 +147,11 @@ grey, made for dark panels.
 - Tested on Linux (BS2 Pro, Intel CPU + NVIDIA laptop GPU): connected, read sensors, set the
   speed, turned off when cold and back on when warm (tested with `--cpu`/`--gpu` pointed at a
   fake temperature file), and disconnected cleanly on SIGINT/SIGTERM.
+- Tested on Windows 11 (same BS2 Pro, Legion Pro 5 16IAX10H: Core Ultra 9 275HX + RTX 5070 Ti),
+  from source and as the `--aot --trim` executable: connected without pairing, read NVML,
+  set the speed, turned off when cold, and turned off and disconnected on Ctrl+C. About
+  70 MB of memory and 1% of a core at the default interval. Elevated, the executable picked
+  the Lenovo EC for both the CPU and the GPU.
 - `patches/webbluetooth@7.1.0.patch` adds the missing `dist/uuid.js`, like in `../debug-dashboard`, and
   `dist/native.js`. `native.js` loads the native addon with a plain `require`. The stock
   napi-rs loader `require()`s a path from an env var, which stops `--trim` from removing

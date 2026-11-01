@@ -1,10 +1,6 @@
 // CPU and GPU temperatures from Linux sysfs, plus nvidia-smi for the proprietary NVIDIA driver.
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-
-export interface Sensor {
-  name: string
-  read(): Promise<number | undefined> // °C, undefined when there's nothing to read right now
-}
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileSensor, type Detected, type Sensor } from './index'
 
 const HWMON = '/sys/class/hwmon'
 const THERMAL = '/sys/class/thermal'
@@ -22,17 +18,6 @@ const list = (dir: string) => {
     return readdirSync(dir)
   } catch {
     return []
-  }
-}
-
-// sysfs temperatures are in millidegrees.
-export function fileSensor(path: string, name = path): Sensor {
-  return {
-    name,
-    async read() {
-      const v = Number(readText(path))
-      return Number.isFinite(v) && v > 0 ? v / 1000 : undefined
-    },
   }
 }
 
@@ -133,22 +118,7 @@ function detectGpus(all: Hwmon[]): Sensor[] {
   return out
 }
 
-export function detectSensors(cpuPaths?: string, gpuPaths?: string) {
+export function detect(): Detected {
   const all = hwmons()
-  const fromPaths = (paths: string) =>
-    paths.split(',').map((p) => {
-      const path = p.trim()
-      if (!existsSync(path)) throw new Error(`Sensor file not found: ${path}`)
-      return fileSensor(path)
-    })
-  const cpu = cpuPaths ? fromPaths(cpuPaths) : [detectCpu(all)].filter((s) => !!s)
-  const gpu = gpuPaths ? fromPaths(gpuPaths) : detectGpus(all)
-  return { cpu, gpu }
-}
-
-// Highest reading of a group, or undefined when none of them reads.
-export async function hottest(sensors: Sensor[]) {
-  const temps = await Promise.all(sensors.map((s) => s.read().catch(() => undefined)))
-  const valid = temps.filter((t) => t !== undefined)
-  return valid.length ? Math.max(...valid) : undefined
+  return { cpu: [detectCpu(all)].filter((s) => !!s), gpu: detectGpus(all) }
 }

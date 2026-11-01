@@ -1,6 +1,6 @@
-// System tray icon, shared by every platform. Only Linux (StatusNotifierItem over D-Bus) is
-// implemented; on other platforms startTray() resolves to undefined and the program runs headless.
-import { startSni } from './sni'
+// System tray icon, shared by every platform: a StatusNotifierItem over D-Bus on Linux
+// (./sni), Shell_NotifyIcon on Windows (./win32). Elsewhere startTray() resolves to undefined
+// and the program runs headless.
 
 // Plain data, so each platform can turn it into its own menu (dbusmenu, a Windows HMENU…).
 export type MenuItem =
@@ -21,10 +21,11 @@ export interface Tray {
   close(): void
 }
 
+// Each process.platform check stays inline, next to its import(), so a build for one platform
+// leaves the other's tray (and dbus-next) out. See detectPlatform() in ../sensors.
 export async function startTray(log: (text: string) => void): Promise<Tray | undefined> {
-  if (process.platform !== 'linux') {
-    log('No tray icon on this platform yet')
-    return undefined
-  }
-  return startSni(log)
+  if (process.platform === 'linux') return (await import('./sni')).startSni(log)
+  if (process.platform === 'win32') return (await import('./win32')).startWin32Tray(log)
+  log('No tray icon on this platform yet')
+  return undefined
 }

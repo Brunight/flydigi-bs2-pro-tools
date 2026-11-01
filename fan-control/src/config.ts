@@ -1,11 +1,15 @@
-// Settings in $XDG_CONFIG_HOME/flydigi-fan/config.json (~/.config by default): the curve saved
-// with --save, and the gear LED setting from the tray, which the cooler can't report back.
+// Settings in $XDG_CONFIG_HOME/flydigi-fan/config.json (~/.config by default, %APPDATA% on
+// Windows): the curve saved with --save, and the gear LED setting from the tray, which the
+// cooler can't report back.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { formatCurve, parseCurve, type Curve } from './curve'
 
-export const CONFIG_PATH = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'flydigi-fan', 'config.json')
+const configHome =
+  process.env.XDG_CONFIG_HOME ||
+  (process.platform === 'win32' ? process.env.APPDATA || join(homedir(), 'AppData', 'Roaming') : join(homedir(), '.config'))
+export const CONFIG_PATH = join(configHome, 'flydigi-fan', 'config.json')
 
 interface Config {
   curve?: string

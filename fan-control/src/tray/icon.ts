@@ -1,8 +1,10 @@
 // Draws the tray icon into an RGBA buffer, no image libraries: a fan cut out of a disc,
 // inside a ring that fills clockwise and shifts green → amber → red.
 // Coordinates are in a 64×64 design space. Plain pixels work for every platform's tray.
+// The fan is light grey for dark panels, or dark grey for light ones.
 
 type RGB = [number, number, number]
+export type Panel = 'dark' | 'light'
 
 const C = 32
 const RING_R = 28.5
@@ -10,7 +12,7 @@ const RING_W = 5
 const DISC_R = 21
 const HUB_R = 4
 const BLADES = 3
-const FG: RGB = [232, 232, 232]
+const FG: Record<Panel, RGB> = { dark: [232, 232, 232], light: [40, 40, 40] }
 const SAMPLES = 4 // per axis, for anti-aliasing
 
 const STOPS: [number, RGB][] = [
@@ -74,7 +76,7 @@ function inBlade(x: number, y: number) {
 }
 
 // One sample: returns [r, g, b, a] with a in 0..1, painted back to front.
-function sample(x: number, y: number, p: number, off: boolean, ring: RGB): [number, number, number, number] {
+function sample(x: number, y: number, p: number, off: boolean, ring: RGB, fg: RGB): [number, number, number, number] {
   const dx = x - C
   const dy = y - C
   const d = Math.hypot(dx, dy)
@@ -92,7 +94,7 @@ function sample(x: number, y: number, p: number, off: boolean, ring: RGB): [numb
   }
 
   // Ring: faint track, then the arc clockwise from 12 o'clock with round caps.
-  if (Math.abs(d - RING_R) <= RING_W / 2) over(FG, 0.22)
+  if (Math.abs(d - RING_R) <= RING_W / 2) over(fg, 0.22)
   if (p > 0) {
     const angle = (Math.atan2(dx, -dy) + 2 * Math.PI) % (2 * Math.PI) // 0 at top, clockwise
     const end = p * 2 * Math.PI
@@ -108,11 +110,11 @@ function sample(x: number, y: number, p: number, off: boolean, ring: RGB): [numb
   }
 
   // Disc with the blades cut out, hub kept.
-  if (d <= DISC_R && (d <= HUB_R || !inBlade(x, y))) over(FG, off ? 0.4 : 1)
+  if (d <= DISC_R && (d <= HUB_R || !inBlade(x, y))) over(fg, off ? 0.4 : 1)
   return [r, g, b, a]
 }
 
-function renderPixel(out: Uint8Array, size: number, px: number, py: number, p: number, off: boolean, ring: RGB) {
+function renderPixel(out: Uint8Array, size: number, px: number, py: number, p: number, off: boolean, ring: RGB, fg: RGB) {
   const scale = 64 / size
   let r = 0
   let g = 0
@@ -120,7 +122,7 @@ function renderPixel(out: Uint8Array, size: number, px: number, py: number, p: n
   let a = 0
   for (let sy = 0; sy < SAMPLES; sy++) {
     for (let sx = 0; sx < SAMPLES; sx++) {
-      const s = sample((px + (sx + 0.5) / SAMPLES) * scale, (py + (sy + 0.5) / SAMPLES) * scale, p, off, ring)
+      const s = sample((px + (sx + 0.5) / SAMPLES) * scale, (py + (sy + 0.5) / SAMPLES) * scale, p, off, ring, fg)
       r += s[0] * s[3]
       g += s[1] * s[3]
       b += s[2] * s[3]
@@ -147,8 +149,8 @@ function ringPixel(size: number, px: number, py: number) {
 // The fan layer per size, drawn once: the blade cut-outs are the expensive part.
 const fanCache = new Map<string, { base: Uint8Array; ring: number[] }>()
 
-function fanLayer(size: number, off: boolean) {
-  const key = `${size}:${off}`
+function fanLayer(size: number, off: boolean, panel: Panel) {
+  const key = `${size}:${off}:${panel}`
   let layer = fanCache.get(key)
   if (!layer) {
     const base = new Uint8Array(size * size * 4)
@@ -156,7 +158,7 @@ function fanLayer(size: number, off: boolean) {
     for (let py = 0; py < size; py++) {
       for (let px = 0; px < size; px++) {
         if (ringPixel(size, px, py)) ring.push(py * size + px)
-        else renderPixel(base, size, px, py, 0, off, [0, 0, 0])
+        else renderPixel(base, size, px, py, 0, off, [0, 0, 0], FG[panel])
       }
     }
     layer = { base, ring }
@@ -165,11 +167,11 @@ function fanLayer(size: number, off: boolean) {
   return layer
 }
 
-// p: position on the fan curve, 0..1. off: below the curve, cooler off.
-export function renderIcon(size: number, p: number, off: boolean): Uint8Array {
-  const { base, ring } = fanLayer(size, off)
+// p: position on the fan curve, 0..1. off: below the curve, cooler off. panel: the tray background.
+export function renderIcon(size: number, p: number, off: boolean, panel: Panel = 'dark'): Uint8Array {
+  const { base, ring } = fanLayer(size, off, panel)
   const out = base.slice()
   const color = heat(p)
-  for (const i of ring) renderPixel(out, size, i % size, Math.floor(i / size), p, off, color)
+  for (const i of ring) renderPixel(out, size, i % size, Math.floor(i / size), p, off, color, FG[panel])
   return out
 }

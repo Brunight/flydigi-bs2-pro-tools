@@ -80,7 +80,7 @@ if (args.help) {
 }
 
 let curve: ReturnType<typeof parseCurve> = []
-let sensors: ReturnType<typeof detectSensors> = { cpu: [], gpu: [] }
+let sensors: Awaited<ReturnType<typeof detectSensors>> = { cpu: [], gpu: [] }
 let gearLeds = true // saved, because the cooler can't report it
 try {
   gearLeds = savedGearLeds()
@@ -90,7 +90,7 @@ try {
     saveCurve(curve)
     log(`Saved the curve to ${CONFIG_PATH}`)
   }
-  sensors = detectSensors(args.cpu, args.gpu)
+  sensors = await detectSensors(args.cpu, args.gpu, log)
 } catch (err) {
   fail(message(err))
 }
