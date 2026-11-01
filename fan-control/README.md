@@ -64,7 +64,7 @@ started, which has exited. Running the task again then finds it already running 
 | Option | Default | |
 |---|---|---|
 | `--curve` | saved curve, else `55:1300,65:2500,75:3200,85:4000` | °C:RPM points, straight lines between them, 1300–4000 RPM. Below the first point the cooler is off |
-| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set; `%APPDATA%lydigi-fannfig.json` on Windows), then run. The tray's Gear LEDs setting is kept there too |
+| `--save` | | Save `--curve` to `~/.config/flydigi-fan/config.json` (`$XDG_CONFIG_HOME` if set; `%APPDATA%\flydigi-fan\config.json` on Windows), then run. The tray's Gear LEDs setting is kept there too |
 | `--interval` | `2` | Seconds between reads |
 | `--down-delay` | `10` | Seconds a lower speed must hold before the fan slows down. Speeding up is immediate |
 | `--off-delay` | `30` | Seconds it has to stay below the curve before turning off |
