@@ -155,8 +155,10 @@ Both draw the same icon, in code (`src/tray/icon.ts`) as plain pixels.
   tray applies it. On Windows it's a mutex in the session, held by the running instance and
   freed if it crashes. On Linux it's a PID file in `$XDG_RUNTIME_DIR`, replaced when the
   process in it is gone. Restart releases it before starting the new process.
-- **Exit**: sets auto standby to "when disconnected" (`0x0D 01`), which is saved on the
-  cooler, then disconnects. The cooler sleeps once no host is connected, so a USB host or
+- **Exit**: sets the lowest speed (1300 RPM), then auto standby to "when disconnected"
+  (`0x0D 01`), which is saved on the cooler, then disconnects. The cooler wakes at the speed
+  it had when it went to sleep, and the laptop's Bluetooth stack can reconnect to it on boot
+  before this program starts, so this keeps that wake-up quiet. The cooler sleeps once no host is connected, so a USB host or
   another Bluetooth connection keeps it running. Press Ctrl+C a second time to quit at once.
 
 ## Tested with

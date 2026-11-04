@@ -45,7 +45,8 @@ Env: COOLER_NAME works like --name.`
 const REFRESH_MS = 30_000
 const RETRY_MS = 5_000
 const SCAN_SECONDS = 10
-const SHUTDOWN_TIMEOUT_MS = 5_000
+// Room for the slow-down, standby and disconnect, each of which can wait on a reply.
+const SHUTDOWN_TIMEOUT_MS = 8_000
 // Share of the tray ring shown at the lowest speed.
 const RING_MIN = 0.05
 

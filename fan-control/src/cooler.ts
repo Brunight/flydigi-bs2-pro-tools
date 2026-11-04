@@ -1,7 +1,7 @@
 // The Bluetooth link to the cooler, cut down from debug-dashboard/src/server/cooler.server.ts to what
 // fan control needs: connect, set a custom speed, put it to sleep on the way out.
 import { Bluetooth } from 'webbluetooth'
-import { CMD, FrameParser, NOTIFY_UUID, SERVICE_UUID, WRITE_UUID, frame, le16, u16, type Frame } from './protocol'
+import { CMD, FrameParser, MIN_RPM, NOTIFY_UUID, SERVICE_UUID, WRITE_UUID, frame, le16, u16, type Frame } from './protocol'
 
 // The firmware takes one frame per 5 ms and drops the rest silently, so leave headroom.
 const WRITE_GAP_MS = 30
@@ -135,8 +135,12 @@ export class Cooler {
   // There is no off command. The cooler sleeps when its last host goes away while auto
   // standby is on, so: standby to "when disconnected", then drop the link. A USB host or
   // another Bluetooth connection (a paired laptop's HID link counts) keeps it awake.
+  // It wakes at the speed it had when it went to sleep (the laptop's Bluetooth stack can
+  // reconnect on boot, before this program runs), so drop to the lowest speed first to keep
+  // that quiet. Best effort: failing to slow it down mustn't stop it turning off.
   async turnOff() {
     if (this.connected) {
+      await this.setSpeed(MIN_RPM).catch(() => {})
       await this.request(CMD.standby, [1])
       await sleep(300) // let the setting land before the link goes
     }
